@@ -16,15 +16,23 @@ class Pathfinder : public godot::Node {
 
 private:
     Ref<AStar2D> graph;
-    NodePath polygon_2d;
+    NodePath debug_draw;
     NodePath nav_region;
+
+    std::vector<PackedVector2Array> islands;
+    std::vector<PackedVector2Array> island_walkable_pts;
+
+    // Parameters for changing graph generation
+    float max_walkable_surface_angle = 55.0f;
+    // The distance between points at which the edge will be subdivided
+    float edge_subdivision_distance = 5.0f;
 
 protected:
 	static void _bind_methods();
 
 public:
-    void set_polygon_2d(const NodePath &p_polygon_2d);
-    NodePath get_polygon_2d() const;
+    void set_debug_draw(const NodePath &p_debug_draw);
+    NodePath get_debug_draw() const;
 
     void set_nav_region(const NodePath &p_nav_region);
     NodePath get_nav_region() const;

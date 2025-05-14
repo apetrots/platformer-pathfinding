@@ -1,16 +1,19 @@
 #include "pathfinder.h"
 
 #include <unordered_map>
+#include <godot_cpp/classes/mesh_instance2d.hpp>
+#include <godot_cpp/classes/immediate_mesh.hpp>
 #include <godot_cpp/classes/tile_data.hpp>
+#include <godot_cpp/classes/geometry2d.hpp>
 
 using namespace godot;
 
 void godot::Pathfinder::_bind_methods()
 {
-    ClassDB::bind_method(D_METHOD("set_polygon_2d", "polygon_2d"), &Pathfinder::set_polygon_2d);
-    ClassDB::bind_method(D_METHOD("get_polygon_2d"), &Pathfinder::get_polygon_2d);
+    ClassDB::bind_method(D_METHOD("set_debug_draw", "debug_draw"), &Pathfinder::set_debug_draw);
+    ClassDB::bind_method(D_METHOD("get_debug_draw"), &Pathfinder::get_debug_draw);
 
-    ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "polygon_2d", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "Polygon2D"), "set_polygon_2d", "get_polygon_2d");
+    ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "debug_draw", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "MeshInstance2D"), "set_debug_draw", "get_debug_draw");
 
 	ClassDB::bind_method(D_METHOD("set_nav_region", "nav_region"), &Pathfinder::set_nav_region);
 	ClassDB::bind_method(D_METHOD("get_nav_region"), &Pathfinder::get_nav_region);
@@ -18,18 +21,18 @@ void godot::Pathfinder::_bind_methods()
     ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "nav_region", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "NavigationRegion2D"), "set_nav_region", "get_nav_region");
 }
 
-void godot::Pathfinder::set_polygon_2d(const NodePath &p_polygon_2d)
+void godot::Pathfinder::set_debug_draw(const NodePath &p_debug_draw)
 {
-    if (polygon_2d == p_polygon_2d) {
+    if (debug_draw == p_debug_draw) {
         return;
     }
 
-    polygon_2d = p_polygon_2d;
+    debug_draw = p_debug_draw;
 }
 
-NodePath godot::Pathfinder::get_polygon_2d() const
+NodePath godot::Pathfinder::get_debug_draw() const
 {
-    return polygon_2d;
+    return debug_draw;
 }
 
 void Pathfinder::set_nav_region(const NodePath &p_nav_region)
@@ -78,8 +81,8 @@ struct Edge
 
 void godot::Pathfinder::generate_graph()
 {
-    Polygon2D *polygon_2d_node = Object::cast_to<Polygon2D>(get_node_or_null(polygon_2d));
-    ERR_FAIL_NULL_MSG(polygon_2d_node, "Polygon2D is invalid: '" + polygon_2d + "'");
+    MeshInstance2D *debug_draw_node = Object::cast_to<MeshInstance2D>(get_node_or_null(debug_draw));
+    ERR_FAIL_NULL_MSG(debug_draw_node, "MeshInstance2D is invalid: '" + debug_draw + "'");
 
     NavigationRegion2D *nav_region_node = Object::cast_to<NavigationRegion2D>(get_node_or_null(nav_region));
     ERR_FAIL_NULL_MSG(nav_region_node, "Navigation region is invalid: '" + nav_region + "'");   
@@ -135,7 +138,7 @@ void godot::Pathfinder::generate_graph()
         }
     }
 
-    std::vector<PackedInt32Array> islands;
+    std::vector<PackedInt32Array> island_idxs;
     
     std::unordered_map<int32_t, std::vector<int32_t>> adjacency_list;
     for (const Edge &edge : edges)
@@ -179,45 +182,70 @@ void godot::Pathfinder::generate_graph()
                 }
             }
 
-            islands.push_back(island);
+            island_idxs.push_back(island);
         }
     }
 
-    Array islands_array;
+    graph.instantiate();
+    int64_t node_id = 0;
+
+    Ref<ImmediateMesh> mesh = debug_draw_node->get_mesh();
+    mesh->surface_begin(Mesh::PRIMITIVE_LINES);
+
+    // TODO: Make this a setting. Might just want to update sometimes.
+    islands.clear();
+
+    islands.reserve(island_idxs.size());
+    for (auto &idxs : island_idxs)
+    {
+        PackedVector2Array pts;
+        pts.resize(idxs.size());
+        
+        for (uint32_t i = 0; i < idxs.size(); i++)
+        {
+            pts[i] = vertices[idxs[i]];
+        }
+
+        islands.push_back(pts);
+    }
+
     for (auto &island : islands)
     {
-        islands_array.append(island);
+        PackedInt32Array island_surfaces;
+        for (uint32_t i = 1; i < island.size(); i++)
+        {
+            uint32_t j = i-1;
+            Vector2 pt1 = island[j];
+            Vector2 pt2 = island[i];
+
+            // Calculate the outward normal
+            Vector2 normal = (pt2 - pt1).normalized().orthogonal();
+            Vector2 mid_point = (pt1 + pt2) / 2.0f;
+            if (Geometry2D::get_singleton()->is_point_in_polygon(mid_point + normal * 0.01f, island))
+            {
+                normal = -normal;
+            }
+
+            // Subdivide the edge if it's too long
+            float distance = pt1.distance_to(pt2);
+
+            float angle_deg = ABS(normal.angle_to(Vector2(0, -1.0f)) * 180.0f / Math_PI);
+            print_line("Angle: " + String::num(angle_deg));
+            if (angle_deg < max_walkable_surface_angle)
+            {
+                // graph->add_point(node_id, vertices[island[i]], 1.0f);
+                // graph->add_point(node_id, vertices[island[j]], 1.0f);
+                // graph->connect_points(node_id, node_id - 1);
+                print_line("Added point: " + String::num_int64(node_id) + " at " + String(island[i]));
+                node_id++;
+                mesh->surface_set_color(Color(1, 0, 0));
+                mesh->surface_add_vertex_2d(pt1);
+                mesh->surface_set_color(Color(1, 0, 0));
+                mesh->surface_add_vertex_2d(pt2);
+            }
+        }
+
     }
-    
-    polygon_2d_node->set_polygon(vertices);
-    polygon_2d_node->set_polygons(islands_array);
 
-    // {
-        // Ref<AStar2D> graph = memnew(AStar2D);
-        // graph->set_name("PathfinderGraph");
-
-        // for (int32_t i = 0; i < island.size(); i++)
-        // {
-        //     int32_t vertex_idx = island[i];
-        //     Vector2 vertex = vertices[vertex_idx];
-        //     graph->add_node(vertex_idx, vertex);
-        // }
-
-        // for (int32_t i = 0; i < island.size(); i++)
-        // {
-        //     int32_t vertex_idx = island[i];
-        //     Vector2 vertex = vertices[vertex_idx];
-
-        //     for (int32_t j = 0; j < adjacency_list[vertex_idx].size(); j++)
-        //     {
-        //         int32_t neighbor_idx = adjacency_list[vertex_idx][j];
-        //         Vector2 neighbor_vertex = vertices[neighbor_idx];
-
-        //         float distance = vertex.distance_to(neighbor_vertex);
-        //         graph->connect_nodes(vertex_idx, neighbor_idx, distance);
-        //     }
-        // }
-
-        // graph->set_name("PathfinderGraph" + String::num_int64(island.size()));
-    // }
+    mesh->surface_end();
 }

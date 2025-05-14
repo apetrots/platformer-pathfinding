@@ -1,4 +1,4 @@
-[gd_scene load_steps=6 format=4 uid="uid://cnr2hp1mckn57"]
+[gd_scene load_steps=8 format=4 uid="uid://cnr2hp1mckn57"]
 
 [ext_resource type="TileSet" uid="uid://cxryupr2vijn1" path="res://tile_set.tres" id="2_0xm2m"]
 [ext_resource type="Script" uid="uid://cq2ncob2pb57k" path="res://player.gd" id="3_1bvp3"]
@@ -7,13 +7,18 @@
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_7mycd"]
 size = Vector2(16, 16)
 
+[sub_resource type="CircleShape2D" id="CircleShape2D_h2yge"]
+radius = 13.25
+
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_1bvp3"]
-vertices = PackedVector2Array(31.0078, -51.9922, 48.0078, -48.0078, -0.0078125, -48.0078, -11, -64.9922, -111.992, -47.9922, 107.992, -113.977, 121.977, 80.9766, 80.0078, 16.0078, 80.0078, -16.0078, -0.0078125, -15.9922, -0.0078125, 32.0078, -15.9922, 16.0078, -15.9922, -0.0078125, -80.0078, -15.9922, -160.008, -0.0078125, -44.0078, -78.9922, -111.992, -64.0078, -0.0078125, -32.0078, -80.0078, -32.0078, 48.0078, -16.0078, 48.0078, 32.0078, 48.0078, 16.0078, -277.977, 73.9922, -160.008, 16.0078, -192.008, -47.9922, -216.992, -103.992, -44.0078, -79.0078, -192.008, -64.0078, 27.0078, -73.0078)
-polygons = Array[PackedInt32Array]([PackedInt32Array(0, 1, 2), PackedInt32Array(3, 0, 2, 4), PackedInt32Array(5, 6, 7, 8), PackedInt32Array(9, 10, 11, 12), PackedInt32Array(13, 9, 12, 14), PackedInt32Array(15, 3, 4, 16), PackedInt32Array(4, 2, 17, 18), PackedInt32Array(8, 19, 1, 5), PackedInt32Array(20, 21, 7, 6), PackedInt32Array(20, 6, 22, 10), PackedInt32Array(11, 10, 22, 23), PackedInt32Array(4, 18, 13, 14, 24), PackedInt32Array(25, 26, 15, 16, 27), PackedInt32Array(1, 0, 28, 5), PackedInt32Array(25, 5, 28, 26), PackedInt32Array(22, 25, 27, 24), PackedInt32Array(23, 22, 24, 14)])
+vertices = PackedVector2Array(107.992, -113.977, 121.977, 80.9766, 80.0078, 16.0078, 80.0078, -16.0078, 40.2578, -72, 38.4922, -78.6406, -0.0078125, -15.9922, -0.0078125, 32.0078, -15.9922, 16.0078, -15.9922, -0.0078125, -80.0078, -15.9922, -160.008, -0.0078125, 38.4922, -65.3672, 48.0078, -48.0078, -111.992, -47.9922, -111.992, -64.0078, -0.0078125, -48.0078, -0.0078125, -32.0078, -80.0078, -32.0078, 48.0078, -16.0078, 33.6406, -60.5078, 27, -58.7422, 20.3672, -60.5078, 15.5078, -65.3672, 48.0078, 32.0078, 48.0078, 16.0078, -277.977, 73.9922, -160.008, 16.0078, -192.008, -47.9922, 33.6406, -83.4922, -216.992, -103.992, -192.008, -64.0078, 20.3672, -83.4922, 27, -85.2578, 13.7422, -72, 15.5078, -78.6406)
+polygons = Array[PackedInt32Array]([PackedInt32Array(0, 1, 2, 3), PackedInt32Array(0, 3, 4, 5), PackedInt32Array(6, 7, 8, 9), PackedInt32Array(10, 6, 9, 11), PackedInt32Array(12, 4, 3, 13), PackedInt32Array(14, 15, 16, 17, 18), PackedInt32Array(3, 19, 13), PackedInt32Array(20, 12, 13), PackedInt32Array(20, 13, 16, 21), PackedInt32Array(22, 21, 16), PackedInt32Array(23, 22, 16), PackedInt32Array(24, 25, 2, 1), PackedInt32Array(24, 1, 26, 7), PackedInt32Array(8, 7, 26, 27), PackedInt32Array(14, 18, 10, 11, 28), PackedInt32Array(0, 5, 29), PackedInt32Array(11, 27, 26, 28), PackedInt32Array(28, 26, 30, 31), PackedInt32Array(32, 15, 31, 30, 0, 33), PackedInt32Array(34, 23, 16, 15), PackedInt32Array(35, 34, 15), PackedInt32Array(32, 35, 15), PackedInt32Array(33, 0, 29)])
 outlines = Array[PackedVector2Array]([PackedVector2Array(-217, -104, 108, -114, 122, 81, -278, 74)])
 source_geometry_mode = 1
 source_geometry_group_name = &"navigation"
 agent_radius = 0.01
+
+[sub_resource type="ImmediateMesh" id="ImmediateMesh_h2yge"]
 
 [node name="Main" type="Node2D"]
 
@@ -40,14 +45,15 @@ zoom = Vector2(3.28, 3.28)
 [node name="StaticBody2D" type="StaticBody2D" parent="." groups=["navigation"]]
 position = Vector2(27, -72)
 
-[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="StaticBody2D"]
-polygon = PackedVector2Array(0, -1, -71, -7, -38, 7, 4, 20)
+[node name="CollisionShape2D" type="CollisionShape2D" parent="StaticBody2D"]
+shape = SubResource("CircleShape2D_h2yge")
 
 [node name="Pathfinder" type="Pathfinder" parent="."]
-polygon_2d = NodePath("Polygon2D")
+debug_draw = NodePath("MeshInstance2D")
 nav_region = NodePath("NavigationRegion2D")
 
 [node name="NavigationRegion2D" type="NavigationRegion2D" parent="Pathfinder"]
 navigation_polygon = SubResource("NavigationPolygon_1bvp3")
 
-[node name="Polygon2D" type="Polygon2D" parent="Pathfinder"]
+[node name="MeshInstance2D" type="MeshInstance2D" parent="Pathfinder"]
+mesh = SubResource("ImmediateMesh_h2yge")
