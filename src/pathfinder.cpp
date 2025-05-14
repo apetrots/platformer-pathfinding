@@ -186,9 +186,6 @@ void godot::Pathfinder::generate_graph()
         }
     }
 
-    graph.instantiate();
-    int64_t node_id = 0;
-
     Ref<ImmediateMesh> mesh = debug_draw_node->get_mesh();
     mesh->surface_begin(Mesh::PRIMITIVE_LINES);
 
@@ -209,9 +206,13 @@ void godot::Pathfinder::generate_graph()
         islands.push_back(pts);
     }
 
+    // Generate the walkable surface points, put them into AStar2D graph and island_surface_pts
+    graph.instantiate();
+    int64_t node_id = 0;
     for (auto &island : islands)
     {
-        PackedInt32Array island_surfaces;
+        PackedVector2Array surf_pts;
+        bool connect_next_pt = false;
         for (uint32_t i = 1; i < island.size(); i++)
         {
             uint32_t j = i-1;
@@ -221,23 +222,40 @@ void godot::Pathfinder::generate_graph()
             // Calculate the outward normal
             Vector2 normal = (pt2 - pt1).normalized().orthogonal();
             Vector2 mid_point = (pt1 + pt2) / 2.0f;
+            
+            // TODO: Might want to double check the 0.01f offset multiplier on the normal.
             if (Geometry2D::get_singleton()->is_point_in_polygon(mid_point + normal * 0.01f, island))
             {
                 normal = -normal;
             }
 
-            // Subdivide the edge if it's too long
-            float distance = pt1.distance_to(pt2);
-
             float angle_deg = ABS(normal.angle_to(Vector2(0, -1.0f)) * 180.0f / Math_PI);
             print_line("Angle: " + String::num(angle_deg));
-            if (angle_deg < max_walkable_surface_angle)
+            // make sure the angle is not past the max walkable surface angle
+            if (angle_deg > max_walkable_surface_angle)
+                continue;
+
+            // add points along the edge to where they are surface_subdivision_distance apart
+            Vector2 edge = pt2 - pt1;
+            uint32_t subdivisions = ceil(edge.length() / max_surface_subdivision_distance);
+            for (uint32_t i = 0; i < subdivisions; i++)
             {
-                // graph->add_point(node_id, vertices[island[i]], 1.0f);
-                // graph->add_point(node_id, vertices[island[j]], 1.0f);
-                // graph->connect_points(node_id, node_id - 1);
-                print_line("Added point: " + String::num_int64(node_id) + " at " + String(island[i]));
+                Vector2 new_pt = pt1 + edge * ((real_t)i / (real_t)subdivisions);
+                surf_pts.push_back(new_pt);
+                graph->add_point(node_id, new_pt, 1.0f);
+                
+                print_line("Adding point: " + String::num(new_pt.x) + ", " + String::num(new_pt.y));
+
+                if (connect_next_pt)
+                    graph->connect_points(node_id, node_id - 1);
+                connect_next_pt = true;
+
                 node_id++;
+            }
+
+            // TODO: only if wanting to debug draw...
+            if (true)
+            {
                 mesh->surface_set_color(Color(1, 0, 0));
                 mesh->surface_add_vertex_2d(pt1);
                 mesh->surface_set_color(Color(1, 0, 0));
@@ -245,6 +263,7 @@ void godot::Pathfinder::generate_graph()
             }
         }
 
+        island_surface_pts.push_back(surf_pts);
     }
 
     mesh->surface_end();

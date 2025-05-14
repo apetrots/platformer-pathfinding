@@ -20,12 +20,13 @@ private:
     NodePath nav_region;
 
     std::vector<PackedVector2Array> islands;
-    std::vector<PackedVector2Array> island_walkable_pts;
+    // the walkable parts, subdivided according to surface_subdivision_distance
+    std::vector<PackedVector2Array> island_surface_pts;
 
     // Parameters for changing graph generation
     float max_walkable_surface_angle = 55.0f;
-    // The distance between points at which the edge will be subdivided
-    float edge_subdivision_distance = 5.0f;
+    // The max allowable distance between points on the surface of islands, otherwise subdivided
+    float max_surface_subdivision_distance = 5.0f;
 
 protected:
 	static void _bind_methods();
