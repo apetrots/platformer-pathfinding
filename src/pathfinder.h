@@ -1,13 +1,13 @@
 #ifndef PATHFINDER_H
 #define PATHFINDER_H
 
-#include <godot_cpp/classes/tile_map_layer.hpp>
 #include <godot_cpp/classes/polygon2d.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/classes/a_star2d.hpp>
 #include <godot_cpp/classes/navigation_region2d.hpp>
 #include <godot_cpp/classes/navigation_polygon.hpp>
 #include <godot_cpp/classes/engine.hpp>
+#include "platformer_astar2d.h"
 
 namespace godot {
 
@@ -15,7 +15,7 @@ class Pathfinder : public godot::Node {
 	GDCLASS(Pathfinder, godot::Node)
 
 private:
-    Ref<AStar2D> graph;
+    Ref<PlatformerAStar2D> graph;
     NodePath debug_draw;
     NodePath nav_region;
 
@@ -28,6 +28,8 @@ private:
     // The max allowable distance between points on the surface of islands, otherwise subdivided
     float max_surface_subdivision_distance = 5.0f;
 
+    // The max allowable linear distance from points to jump between, quick filter without physics-based jump test simulation
+    float max_jump_distance = 400.0f;
 protected:
 	static void _bind_methods();
 

@@ -85,7 +85,8 @@ void godot::Pathfinder::generate_graph()
     ERR_FAIL_NULL_MSG(debug_draw_node, "MeshInstance2D is invalid: '" + debug_draw + "'");
 
     NavigationRegion2D *nav_region_node = Object::cast_to<NavigationRegion2D>(get_node_or_null(nav_region));
-    ERR_FAIL_NULL_MSG(nav_region_node, "Navigation region is invalid: '" + nav_region + "'");   
+    ERR_FAIL_NULL_MSG(nav_region_node, "Navigation region is invalid: '" + nav_region + "'");
+    nav_region_node->bake_navigation_polygon(false);
 
     Ref<NavigationPolygon> nav_polygon = nav_region_node->get_navigation_polygon();
     ERR_FAIL_NULL_MSG(nav_polygon, "Navigation polygon is invalid: '" + nav_region + "'"); 
@@ -211,6 +212,10 @@ void godot::Pathfinder::generate_graph()
     int64_t node_id = 0;
     for (auto &island : islands)
     {
+        // for special case where the starting edge is walkable, set this to the node_id there, 
+        // so we can loop back and connect the end edge to it if its also walkable. 
+        int64_t start_node_id = -1;
+
         PackedVector2Array surf_pts;
         bool connect_next_pt = false;
         for (uint32_t i = 1; i < island.size(); i++)
@@ -230,10 +235,56 @@ void godot::Pathfinder::generate_graph()
             }
 
             float angle_deg = ABS(normal.angle_to(Vector2(0, -1.0f)) * 180.0f / Math_PI);
-            print_line("Angle: " + String::num(angle_deg));
             // make sure the angle is not past the max walkable surface angle
             if (angle_deg > max_walkable_surface_angle)
+            {
+                // end of continuous walkable surface
+                connect_next_pt = false;
+
+                if (surf_pts.size() > 0)
+                {
+                    print_line("new surface! " + String::num_int64(surf_pts.size()));
+                    island_surface_pts.push_back(surf_pts);
+                    surf_pts.clear();
+                }
+                
                 continue;
+            }
+            
+            if (i == 1)
+            {
+                start_node_id = node_id;
+                print_line("Start node: " + String::num(start_node_id));
+            }
+
+            if (connect_next_pt)
+            {
+                graph->add_point(node_id++, pt2);
+                graph->connect_points(node_id - 1, node_id - 2);
+
+                // TODO testing
+                // surf_pts.push_back(pt2);
+            }
+            else
+            {
+                graph->add_point(node_id++, pt1);
+                graph->add_point(node_id++, pt2);
+
+                graph->connect_points(node_id - 1, node_id - 2);
+
+                // // TODO testing
+                // surf_pts.push_back(pt1);
+                // surf_pts.push_back(pt2);
+            }
+            
+            // start or keep the continuous walkable surface going...
+            connect_next_pt = true;
+
+            // last edge being tested, walkable and the first edge was also walkable...
+            if (i == island.size() - 1 && start_node_id != -1)
+                graph->connect_points(node_id-1, start_node_id);
+            
+
 
             // add points along the edge to where they are surface_subdivision_distance apart
             Vector2 edge = pt2 - pt1;
@@ -242,15 +293,16 @@ void godot::Pathfinder::generate_graph()
             {
                 Vector2 new_pt = pt1 + edge * ((real_t)i / (real_t)subdivisions);
                 surf_pts.push_back(new_pt);
-                graph->add_point(node_id, new_pt, 1.0f);
+                // TODO: This may be wrong.
+                // But I feel like it'd be better to add only the end points of the edge to the graph, and if there's jumpable inbetween nodes,
+                // add them as the start and end points of a jump connection.
+                // graph->add_point(node_id, new_pt, 1.0f);
                 
-                print_line("Adding point: " + String::num(new_pt.x) + ", " + String::num(new_pt.y));
+                // print_line("Adding point: " + String::num(new_pt.x) + ", " + String::num(new_pt.y));
 
-                if (connect_next_pt)
-                    graph->connect_points(node_id, node_id - 1);
-                connect_next_pt = true;
-
-                node_id++;
+                // if (connect_next_pt)
+                //     graph->connect_points(node_id, node_id - 1);
+                // connect_next_pt = true;
             }
 
             // TODO: only if wanting to debug draw...
@@ -262,9 +314,31 @@ void godot::Pathfinder::generate_graph()
                 mesh->surface_add_vertex_2d(pt2);
             }
         }
-
-        island_surface_pts.push_back(surf_pts);
+        if (surf_pts.size() > 0)
+        {
+            print_line("new surface (at the end)! " + String::num_int64(surf_pts.size()));
+            island_surface_pts.push_back(surf_pts);
+            surf_pts.clear();
+        }
     }
 
+    // Add jump connections between islands.
+    // for (auto &island : islands)
+    // {
+    //     for (int32_t i = 0; i < island.size(); i++)
+    //     {
+    //         Vector2 pt1 = island[i];
+    //         for (int32_t j = i + 1; j < island.size(); j++)
+    //         {
+    //             Vector2 pt2 = island[j];
+    //             if (pt1.distance_squared_to(pt2) > max_jump_distance * max_jump_distance)
+    //                 continue;
+
+    //             graph->add_jump_node(0, 1);
+    //         }
+    //     }
+    // }
+
+    print_line("surfaces: " + String::num_int64(island_surface_pts.size()) + "\n");
     mesh->surface_end();
 }
