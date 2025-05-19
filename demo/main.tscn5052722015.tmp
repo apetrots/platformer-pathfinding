@@ -21,8 +21,8 @@ script/source = "extends ShapeCast2D
 
 var has_run = false
 
-func _process(delta: float) -> void:
-	if !has_run:
+func _physics_process(delta: float) -> void:
+	if !has_run
 		print_debug(collision_result.size())
 		has_run = true
 "

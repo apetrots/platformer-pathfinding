@@ -11,11 +11,17 @@
 
 namespace godot {
 
+struct JumpInfo {
+    real_t jump_duration;
+    Vector2 from;
+    Vector2 to;
+};
+
 class PlatformerAStar2D : public AStar2D {
     GDCLASS(PlatformerAStar2D, AStar2D)
     
     float jump_node_weight_scale = 100.0f;
-    std::unordered_map<int64_t, Vector2> jump_velocities;
+    std::unordered_map<int64_t, JumpInfo> jumps;
 protected:
     static void _bind_methods();
 public:
@@ -23,11 +29,11 @@ public:
 
     float _estimate_cost(int64_t from_id, int64_t end_id) const override;
 
-    int64_t add_jump_node(int64_t from, int64_t to, Vector2 jump_velocity);
+    int64_t add_jump_node(int64_t from, int64_t to, real_t jump_duration);
 
     bool is_jump_node(int64_t node) const;
 
-    Vector2 get_jump_velocity(int64_t jump_node_id);
+    real_t get_jump_duration(int64_t jump_node_id);
 };
 
 }

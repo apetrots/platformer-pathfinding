@@ -5,6 +5,7 @@
 #include <godot_cpp/classes/immediate_mesh.hpp>
 #include <godot_cpp/classes/tile_data.hpp>
 #include <godot_cpp/classes/geometry2d.hpp>
+#include <algorithm>
 
 using namespace godot;
 
@@ -57,16 +58,13 @@ godot::Pathfinder::~Pathfinder()
 {
 }
 
-void godot::Pathfinder::_ready()
-{
-    if (!Engine::get_singleton()->is_editor_hint()) {
-        // Your game play only code.
-        generate_graph();
-    }
-}
-
 void godot::Pathfinder::_process(double delta)
 {
+    if (!Engine::get_singleton()->is_editor_hint() && to_generate_graph) {
+        // Your game play only code.
+        generate_graph();
+        to_generate_graph = false;
+    }
 }
 
 void godot::Pathfinder::find_path(Vector2 from, Vector2 to)
@@ -217,6 +215,7 @@ void godot::Pathfinder::generate_graph()
         int64_t start_node_id = -1;
 
         PackedVector2Array surf_pts;
+        PackedInt64Array surf_node_ids;
         bool connect_next_pt = false;
         for (uint32_t i = 1; i < island.size(); i++)
         {
@@ -245,6 +244,7 @@ void godot::Pathfinder::generate_graph()
                 {
                     print_line("new surface! " + String::num_int64(surf_pts.size()));
                     island_surface_pts.push_back(surf_pts);
+                    island_surface_node_ids.push_back(surf_node_ids);
                     surf_pts.clear();
                 }
                 
@@ -263,7 +263,8 @@ void godot::Pathfinder::generate_graph()
                 graph->connect_points(node_id - 1, node_id - 2);
 
                 // TODO testing
-                // surf_pts.push_back(pt2);
+                surf_pts.push_back(pt2);
+                surf_node_ids.push_back(node_id - 1);
             }
             else
             {
@@ -273,8 +274,11 @@ void godot::Pathfinder::generate_graph()
                 graph->connect_points(node_id - 1, node_id - 2);
 
                 // // TODO testing
-                // surf_pts.push_back(pt1);
-                // surf_pts.push_back(pt2);
+                surf_pts.push_back(pt1);
+                surf_node_ids.push_back(node_id - 2);
+                surf_pts.push_back(pt2);
+                surf_node_ids.push_back(node_id - 1);
+
             }
             
             // start or keep the continuous walkable surface going...
@@ -283,27 +287,6 @@ void godot::Pathfinder::generate_graph()
             // last edge being tested, walkable and the first edge was also walkable...
             if (i == island.size() - 1 && start_node_id != -1)
                 graph->connect_points(node_id-1, start_node_id);
-            
-
-
-            // add points along the edge to where they are surface_subdivision_distance apart
-            Vector2 edge = pt2 - pt1;
-            uint32_t subdivisions = ceil(edge.length() / max_surface_subdivision_distance);
-            for (uint32_t i = 0; i < subdivisions; i++)
-            {
-                Vector2 new_pt = pt1 + edge * ((real_t)i / (real_t)subdivisions);
-                surf_pts.push_back(new_pt);
-                // TODO: This may be wrong.
-                // But I feel like it'd be better to add only the end points of the edge to the graph, and if there's jumpable inbetween nodes,
-                // add them as the start and end points of a jump connection.
-                // graph->add_point(node_id, new_pt, 1.0f);
-                
-                // print_line("Adding point: " + String::num(new_pt.x) + ", " + String::num(new_pt.y));
-
-                // if (connect_next_pt)
-                //     graph->connect_points(node_id, node_id - 1);
-                // connect_next_pt = true;
-            }
 
             // TODO: only if wanting to debug draw...
             if (true)
@@ -318,27 +301,252 @@ void godot::Pathfinder::generate_graph()
         {
             print_line("new surface (at the end)! " + String::num_int64(surf_pts.size()));
             island_surface_pts.push_back(surf_pts);
+            island_surface_node_ids.push_back(surf_node_ids);
             surf_pts.clear();
         }
     }
 
+    // move edges inward until we sized agent can actually stand with it's center there.
+    {
+        Ref<World2D> world = get_viewport()->get_world_2d();
+        PhysicsDirectSpaceState2D *space_state = world->get_direct_space_state();
+    
+        Ref<RectangleShape2D> rect_shape;
+        rect_shape.instantiate();
+        rect_shape->set_size(agent_size);
+    
+        Ref<PhysicsShapeQueryParameters2D> params;
+        params.instantiate();
+        params->set_shape(rect_shape);
+
+        for (int32_t surf_idx = 0; surf_idx < island_surface_pts.size(); surf_idx++)
+        {
+            auto &surf = island_surface_pts[surf_idx];
+            auto &node_ids = island_surface_node_ids[surf_idx];
+            
+            // only contract the edges on either end of a surface, we know the middle is all walkable.
+            {
+                Vector2 surf_pt1 = surf[0];
+                Vector2 surf_pt2 = surf[1];
+                Vector2 surf_edge = surf_pt2 - surf_pt1;
+
+                Vector2 pos = surf_pt1 - Vector2(0, agent_size.height / 2.0f);
+                print_line("pos: " + String::num(pos.x) + ", " + String::num(pos.y));
+
+                params->set_transform(Transform2D(0.0f, pos));
+                
+                // away from collision is surf_edge.normalized()
+                if (space_state->intersect_shape(params, 1).size() > 0)
+                {
+                    print_line("move inward 1!");
+                    // If collision, move further inward.
+                    surf[0] = surf_pt1 + surf_edge.normalized() * (agent_size.width / 2.0f);
+                    int64_t node_id = node_ids[0];
+                    graph->set_point_position(node_id, surf[0]);
+                }
+            }
+            {
+                Vector2 surf_pt1 = surf[surf.size() - 1];
+                Vector2 surf_pt2 = surf[surf.size() - 2];
+                Vector2 surf_edge = surf_pt2 - surf_pt1;
+
+                Vector2 pos = surf_pt1 - Vector2(0, agent_size.height / 2.0f);
+
+                params->set_transform(Transform2D(0.0f, pos));
+                
+                // away from collision is surf_edge.normalized()
+                if (space_state->collide_shape(params, 1).size() > 0)
+                {
+                    print_line("move inward 2!");
+                    // If collision, move further inward.
+                    surf[surf.size() - 1] = surf_pt1 + surf_edge.normalized() * (agent_size.width / 2.0f);
+                    int64_t node_id = node_ids[surf.size() - 1];
+                    graph->set_point_position(node_id, surf[surf.size() - 1]);
+                }
+            }
+        }
+    }
+
+    // print_line("surfaces: " + String::num_int64(island_surface_pts.size()) + "\n");
+
     // Add jump connections between islands.
-    // for (auto &island : islands)
-    // {
-    //     for (int32_t i = 0; i < island.size(); i++)
-    //     {
-    //         Vector2 pt1 = island[i];
-    //         for (int32_t j = i + 1; j < island.size(); j++)
-    //         {
-    //             Vector2 pt2 = island[j];
-    //             if (pt1.distance_squared_to(pt2) > max_jump_distance * max_jump_distance)
-    //                 continue;
+    for (int32_t surf1_idx = 0; surf1_idx < island_surface_pts.size(); surf1_idx++)
+    {
+        for (int32_t surf2_idx = surf1_idx+1; surf2_idx < island_surface_pts.size(); surf2_idx++)
+        {
+            auto &surf1 = island_surface_pts[surf1_idx];
+            auto &surf2 = island_surface_pts[surf2_idx];
+            
+            // compare each edge of surf1 to each edge of surf2
+            // TODO do this for each agent type, so we can have different hitboxes for different agents?
 
-    //             graph->add_jump_node(0, 1);
-    //         }
-    //     }
-    // }
+            // TODO: Make this a class, so we can save info for later creating the jump connections with knowledge
+            // of the walkable nodes it has to connect to on either side.
+            // TODO Need these properties for each direction (surf1 -> surf2 and surf2 -> surf1)
+            real_t lowest_jump_magnitude_squared = INFINITY, lowest_jump_duration = -1.0f;
+            Vector2 lowest_jump_to, lowest_jump_from;
+            uint32_t surf1_edge_idx = 0, surf2_edge_idx = 0; 
+            for (uint32_t i = 1; i < surf1.size(); i++)
+            {
+                Vector2 surf1_pt1 = surf1[i-1];
+                Vector2 surf1_pt2 = surf1[i];
+                Vector2 surf1_edge = surf1_pt2 - surf1_pt1;
+                
+                for (uint32_t j = 1; j < surf2.size(); j++)
+                {
+                    Vector2 surf2_pt1 = surf2[j-1];
+                    Vector2 surf2_pt2 = surf2[j];
 
-    print_line("surfaces: " + String::num_int64(island_surface_pts.size()) + "\n");
+                    PackedVector2Array closest_points = Geometry2D::get_singleton()->get_closest_points_between_segments(surf1_pt1, surf1_pt2, surf2_pt1, surf2_pt2);
+                    Vector2 closest_pt1 = closest_points[0];
+                    Vector2 closest_pt2 = closest_points[1];
+
+                    // quick filter
+                    if (closest_pt1.distance_squared_to(closest_pt2) > max_jump_distance * max_jump_distance)
+                        continue;
+
+                    Vector2 surf2_edge = surf2_pt2 - surf2_pt1;
+                    
+                    // TODO maybe i dont need to subdivide the edges if we can find another way to get closest points on the edges between eachotherg
+                    // test from the point closest to the point we're jumping from out (or that point but offset by the hitbox distance)
+                    
+                    // Geometry2D::get_singleton()->get_closest_points_between_segments(surf1_pt1, surf1_pt2, surf2_pt1, surf2_pt2)
+
+                    // DIRECTION 1 (surf1 -> surf2)
+                
+                    // add points along the edge to where they are surface_subdivision_distance apart
+                    uint32_t subdivisions = ceilf((real_t)surf1_edge.length() / (real_t)max_surface_subdivision_distance);
+                    for (uint32_t subd = 0; subd < subdivisions; subd++)
+                    {
+                        // TODO start subdivision search from the middle of the edge
+                        // print_line("subd: " + String::num(subd) + " of " + String::num(subdivisions));
+                        Vector2 jump_from = surf1_pt1 + surf1_edge * ((real_t)subd / (real_t)subdivisions);
+                        Vector2 jump_to = Geometry2D::get_singleton()->get_closest_point_to_segment(jump_from, surf2_pt1, surf2_pt2);
+                        
+                        Vector2 out_velocity;
+                        float jump_duration = try_find_unobstructed_jump(out_velocity, jump_from, jump_to, 5);
+                        if (jump_duration > 0.0f)
+                        {
+                            if (out_velocity.length_squared() < lowest_jump_magnitude_squared)
+                            {
+                                lowest_jump_magnitude_squared = out_velocity.length_squared();
+                                lowest_jump_duration = jump_duration;
+                                lowest_jump_from = jump_from;
+                                lowest_jump_to = jump_to;
+                                surf1_edge_idx = i;
+                                surf2_edge_idx = j;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (lowest_jump_duration > 0.0f)
+            {
+                print_line("Jump from: " + String::num(lowest_jump_from.x) + ", " + String::num(lowest_jump_from.y) + " to: " + String::num(lowest_jump_to.x) + ", " + String::num(lowest_jump_to.y));
+                print_line("jump duration: " + String::num(lowest_jump_duration));
+                // print_line("with jump velocity: " + String::num(lowest_jump_velocity.x) + ", " + String::num(lowest_jump_velocity.y));
+                // print_line("edge1: " + String::num(surf1_edge_idx));
+                // print_line("edge2: " + String::num(surf2_edge_idx));
+                // print_line("surf1: " + String::num(surf1_idx) + " of " + String::num(island_surface_node_ids.size()));
+                // print_line("surf2: " + String::num(surf2_idx) + " of " + String::num(island_surface_node_ids.size()));
+                // print_line("surfaces: " + String::num_int64(island_surface_pts.size()) + "\n");
+
+                int64_t edge1_node1 = island_surface_node_ids[surf1_idx][surf1_edge_idx];
+                int64_t edge1_node2 = island_surface_node_ids[surf1_idx][surf1_edge_idx - 1];
+   
+                int64_t edge2_node1 = island_surface_node_ids[surf2_idx][surf2_edge_idx];
+                int64_t edge2_node2 = island_surface_node_ids[surf2_idx][surf2_edge_idx - 1];
+
+
+                int64_t jump_from_node = node_id; 
+                graph->add_point(node_id++, lowest_jump_from);
+                graph->connect_points(jump_from_node, edge1_node1);
+                graph->connect_points(jump_from_node, edge1_node2);
+                // TODO is disconnecting necessary?
+                graph->disconnect_points(edge1_node1, edge1_node2);
+                
+                int64_t jump_to_node = node_id; 
+                graph->add_point(node_id++, lowest_jump_to);
+                graph->connect_points(jump_to_node, edge2_node1);
+                graph->connect_points(jump_to_node, edge2_node2);
+                // TODO is disconnecting necessary?
+                graph->disconnect_points(edge2_node1, edge2_node2);
+                
+                graph->add_jump_node(jump_from_node, jump_to_node, lowest_jump_duration);
+
+                // debug draw jump
+                Vector2 delta_pos = lowest_jump_to - lowest_jump_from;
+                Vector2 start_pos(lowest_jump_from.x, lowest_jump_from.y - agent_size.height / 2.0f);
+                Vector2 end_pos = start_pos + delta_pos;
+                Vector2 jump_velocity = delta_pos/lowest_jump_duration - acceleration * lowest_jump_duration * 0.5f;
+                print_line("Jump velocity: " + String::num(jump_velocity.x) + ", " + String::num(jump_velocity.y));
+
+                mesh->surface_set_color(Color(0, 1, 0));
+                mesh->surface_add_vertex_2d(start_pos);
+                mesh->surface_add_vertex_2d(start_pos + Vector2(0, -1.0));
+                mesh->surface_set_color(Color(0, 0, 1));
+                mesh->surface_add_vertex_2d(start_pos);
+                for (real_t t = 0.0f; t < lowest_jump_duration; t += 1.0/(real_t)5.0)
+                {
+                    Vector2 pos = start_pos + jump_velocity * t + 0.5f * acceleration * t * t;
+                    mesh->surface_add_vertex_2d(pos);
+                    mesh->surface_add_vertex_2d(pos);
+                }
+                mesh->surface_add_vertex_2d(end_pos);
+                
+                mesh->surface_set_color(Color(0, 1, 1));
+                mesh->surface_add_vertex_2d(start_pos);
+                mesh->surface_set_color(Color(1, 1, 0));
+                mesh->surface_add_vertex_2d(end_pos);
+            }
+        }
+    }
+
+
+
     mesh->surface_end();
+}
+
+float godot::Pathfinder::try_find_unobstructed_jump(Vector2& out_velocity, Vector2 from, Vector2 to, int test_intervals)
+{
+    out_velocity = Vector2(0.0, 0.0);
+    float jump_duration = -1.0f;
+
+    Ref<World2D> world = get_viewport()->get_world_2d();
+    PhysicsDirectSpaceState2D *space_state = world->get_direct_space_state();
+
+    Ref<RectangleShape2D> rect_shape;
+    rect_shape.instantiate();
+    rect_shape->set_size(agent_size);
+
+    Ref<PhysicsShapeQueryParameters2D> params;
+    params.instantiate();
+    params->set_shape(rect_shape);
+    params->set_collision_mask(1);
+
+    Vector2 delta_pos = to - from;
+
+    // start at lowest energy jump
+    jump_duration = sqrtf(sqrtf(4.0 * delta_pos.dot(delta_pos) / acceleration.dot(acceleration)));
+    // print_line("trying to find jump velocity with duration: " + String::num(jump_duration) + " with delta pos: " + String::num(delta_pos.x) + ", " + String::num(delta_pos.y));
+
+    Vector2 jump_velocity = delta_pos/jump_duration - acceleration * jump_duration * 0.5f;
+
+    Vector2 start_pos(from.x, from.y - agent_size.height / 2.0f);
+
+    for (real_t t = 0.0f; t < jump_duration; t += 1.0/(real_t)collision_tests_per_second)
+    {
+        Vector2 pos = start_pos + jump_velocity * t + 0.5f * acceleration * t * t;
+        
+        params->set_transform(Transform2D(0.0f, pos));
+        if (space_state->collide_shape(params, 1).size() > 0)
+        {
+            print_line("Jump blocked at time " + String::num(t) + " out of " + String::num(jump_duration));
+            return -1.0f;
+        }   
+    }
+
+    out_velocity = jump_velocity;
+    return jump_duration;
 }

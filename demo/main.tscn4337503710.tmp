@@ -19,12 +19,8 @@ size = Vector2(15, 15)
 [sub_resource type="GDScript" id="GDScript_ig7tw"]
 script/source = "extends ShapeCast2D
 
-var has_run = false
-
 func _process(delta: float) -> void:
-	if !has_run:
-		print_debug(collision_result.size())
-		has_run = true
+	print_debug(collision_result.size())
 "
 
 [node name="Main" type="Node2D"]
@@ -50,8 +46,9 @@ position = Vector2(-121.585, -33.195)
 zoom = Vector2(2.615, 2.615)
 
 [node name="ShapeCast2D" type="ShapeCast2D" parent="."]
-position = Vector2(-18, -37)
+position = Vector2(-17, -44)
 shape = SubResource("RectangleShape2D_ig7tw")
-target_position = Vector2(0, 0.5)
+target_position = Vector2(0, 13.33)
 max_results = 1
+collide_with_areas = true
 script = SubResource("GDScript_ig7tw")
