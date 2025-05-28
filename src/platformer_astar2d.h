@@ -12,7 +12,7 @@
 namespace godot {
 
 struct JumpInfo {
-    real_t jump_duration;
+    real_t duration;
     Vector2 from;
     Vector2 to;
 };
@@ -29,11 +29,11 @@ public:
 
     float _estimate_cost(int64_t from_id, int64_t end_id) const override;
 
-    int64_t add_jump_node(int64_t from, int64_t to, real_t jump_duration);
+    int64_t add_jump_node(int64_t from, int64_t to, real_t duration);
 
     bool is_jump_node(int64_t node) const;
 
-    real_t get_jump_duration(int64_t jump_node_id);
+    const JumpInfo* get_jump_info(int64_t node_id);
 };
 
 }

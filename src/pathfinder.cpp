@@ -20,6 +20,8 @@ void godot::Pathfinder::_bind_methods()
 	ClassDB::bind_method(D_METHOD("get_nav_region"), &Pathfinder::get_nav_region);
 
     ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "nav_region", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "NavigationRegion2D"), "set_nav_region", "get_nav_region");
+
+    ClassDB::bind_method(D_METHOD("find_path", "from", "to"), &Pathfinder::find_path);
 }
 
 void godot::Pathfinder::set_debug_draw(const NodePath &p_debug_draw)
@@ -61,7 +63,6 @@ godot::Pathfinder::~Pathfinder()
 void godot::Pathfinder::_process(double delta)
 {
     if (!Engine::get_singleton()->is_editor_hint() && to_generate_graph) {
-        // Your game play only code.
         generate_graph();
         to_generate_graph = false;
     }
@@ -69,12 +70,91 @@ void godot::Pathfinder::_process(double delta)
 
 void godot::Pathfinder::find_path(Vector2 from, Vector2 to)
 {
+    if (graph.is_null())
+    {
+        print_line("Graph is null!");
+        return;
+    }
+
+    int64_t from_id = graph->get_closest_point(from);
+    int64_t to_id = graph->get_closest_point(to);
+
+    if (from_id == -1 || to_id == -1)
+    {
+        print_line("Invalid point!");
+        return;
+    }
+
+    PackedInt64Array path_ids = graph->get_id_path(from_id, to_id);
+
+    if (path_ids.size() == 0)
+    {
+        return;
+    }
+
+    MeshInstance2D *debug_draw_node = Object::cast_to<MeshInstance2D>(get_node_or_null(debug_draw));
+    ERR_FAIL_NULL_MSG(debug_draw_node, "MeshInstance2D is invalid: '" + debug_draw + "'");
+
+    Ref<ImmediateMesh> mesh = debug_draw_node->get_mesh();
+    mesh->clear_surfaces();
+    mesh->surface_begin(Mesh::PRIMITIVE_LINE_STRIP);
+
+    Vector2 start_pt = graph->get_point_position(path_ids[0]);
+    mesh->surface_add_vertex_2d(start_pt);
+
+    for (int64_t node_id : path_ids)
+    {
+        Vector2 pt = graph->get_point_position(node_id);
+        auto scale = graph->get_point_weight_scale(node_id);
+        print_line("Node: " + String::num(node_id) + ", " + String::num(scale));
+        print_line("Node pos: " + String::num(pt.x) + ", " + String::num(pt.y));
+
+        auto jump_info = graph->get_jump_info(node_id);
+        if (jump_info != NULL)
+        {
+            Vector2 delta_pos = jump_info->to - jump_info->from;
+            Vector2 start_pos(jump_info->from.x, jump_info->from.y - agent_size.height / 2.0f);
+            Vector2 end_pos = start_pos + delta_pos;
+            Vector2 jump_velocity = delta_pos/jump_info->duration - acceleration * jump_info->duration * 0.5f;
+            print_line("Jumpin on the path! " + String::num(jump_velocity.x) + ", " + String::num(jump_velocity.y));
+
+            mesh->surface_set_color(Color(0, 1, 0));
+            mesh->surface_add_vertex_2d(jump_info->from);
+            mesh->surface_set_color(Color(0, 0, 1));
+            mesh->surface_add_vertex_2d(start_pos);
+            for (real_t t = 0.0f; t < jump_info->duration; t += 1.0/(real_t)5.0)
+            {
+                Vector2 pos = start_pos + jump_velocity * t + 0.5f * acceleration * t * t;
+                mesh->surface_add_vertex_2d(pos);
+            }
+            mesh->surface_add_vertex_2d(end_pos);
+            mesh->surface_set_color(Color(0, 1, 0));
+            mesh->surface_add_vertex_2d(jump_info->to);
+        }
+        else
+        {
+            Vector2 pt = graph->get_point_position(node_id);
+            mesh->surface_set_color(Color(0, 1, 0));
+            mesh->surface_add_vertex_2d(pt);
+        }
+
+    }
+
+    mesh->surface_end();
 }
 
 struct Edge
 {
     int32_t p1_idx;
     int32_t p2_idx;
+};
+
+struct JumpNodeInfo
+{
+    real_t magnitude_squared; 
+    real_t duration = -1.0f;
+    Vector2 to, from;
+    uint32_t surf1_edge_idx, surf2_edge_idx;
 };
 
 void godot::Pathfinder::generate_graph()
@@ -207,7 +287,6 @@ void godot::Pathfinder::generate_graph()
 
     // Generate the walkable surface points, put them into AStar2D graph and island_surface_pts
     graph.instantiate();
-    int64_t node_id = 0;
     for (auto &island : islands)
     {
         // for special case where the starting edge is walkable, set this to the node_id there, 
@@ -216,7 +295,7 @@ void godot::Pathfinder::generate_graph()
 
         PackedVector2Array surf_pts;
         PackedInt64Array surf_node_ids;
-        bool connect_next_pt = false;
+        int64_t last_node = -1;
         for (uint32_t i = 1; i < island.size(); i++)
         {
             uint32_t j = i-1;
@@ -238,7 +317,7 @@ void godot::Pathfinder::generate_graph()
             if (angle_deg > max_walkable_surface_angle)
             {
                 // end of continuous walkable surface
-                connect_next_pt = false;
+                last_node = -1;
 
                 if (surf_pts.size() > 0)
                 {
@@ -246,47 +325,53 @@ void godot::Pathfinder::generate_graph()
                     island_surface_pts.push_back(surf_pts);
                     island_surface_node_ids.push_back(surf_node_ids);
                     surf_pts.clear();
+                    surf_node_ids.clear();
                 }
                 
                 continue;
             }
             
-            if (i == 1)
+       
+            if (last_node != -1)
             {
-                start_node_id = node_id;
-                print_line("Start node: " + String::num(start_node_id));
-            }
-
-            if (connect_next_pt)
-            {
-                graph->add_point(node_id++, pt2);
-                graph->connect_points(node_id - 1, node_id - 2);
+                auto node_id = graph->get_point_count();
+                graph->add_point(node_id, pt2);
+                graph->connect_points(last_node, node_id);
 
                 // TODO testing
                 surf_pts.push_back(pt2);
-                surf_node_ids.push_back(node_id - 1);
+                surf_node_ids.push_back(node_id);
+                
+                last_node = node_id;
             }
             else
             {
-                graph->add_point(node_id++, pt1);
-                graph->add_point(node_id++, pt2);
+                auto node_id = graph->get_point_count();
+                if (i == 1)
+                {
+                    start_node_id = node_id;
+                    print_line("Start node: " + String::num(start_node_id));
+                }
+    
+                graph->add_point(node_id, pt1);
+                graph->add_point(node_id+1, pt2);
 
-                graph->connect_points(node_id - 1, node_id - 2);
+                graph->connect_points(node_id, node_id + 1);
 
                 // // TODO testing
                 surf_pts.push_back(pt1);
-                surf_node_ids.push_back(node_id - 2);
+                surf_node_ids.push_back(node_id);
                 surf_pts.push_back(pt2);
-                surf_node_ids.push_back(node_id - 1);
+                surf_node_ids.push_back(node_id + 1);
+
+                // start or keep the continuous walkable surface going...
+                last_node = node_id + 1;
 
             }
             
-            // start or keep the continuous walkable surface going...
-            connect_next_pt = true;
-
             // last edge being tested, walkable and the first edge was also walkable...
             if (i == island.size() - 1 && start_node_id != -1)
-                graph->connect_points(node_id-1, start_node_id);
+                graph->connect_points(last_node, start_node_id);
 
             // TODO: only if wanting to debug draw...
             if (true)
@@ -303,6 +388,7 @@ void godot::Pathfinder::generate_graph()
             island_surface_pts.push_back(surf_pts);
             island_surface_node_ids.push_back(surf_node_ids);
             surf_pts.clear();
+            surf_node_ids.clear();
         }
     }
 
@@ -383,9 +469,16 @@ void godot::Pathfinder::generate_graph()
             // TODO: Make this a class, so we can save info for later creating the jump connections with knowledge
             // of the walkable nodes it has to connect to on either side.
             // TODO Need these properties for each direction (surf1 -> surf2 and surf2 -> surf1)
-            real_t lowest_jump_magnitude_squared = INFINITY, lowest_jump_duration = -1.0f;
-            Vector2 lowest_jump_to, lowest_jump_from;
-            uint32_t surf1_edge_idx = 0, surf2_edge_idx = 0; 
+
+            // direction 1 (surf1 -> surf2)
+            JumpNodeInfo lowest_jump1;
+            lowest_jump1.magnitude_squared = INFINITY;
+            lowest_jump1.duration = -1.0f;
+
+            // direction 2 (surf2 -> surf1)
+            JumpNodeInfo lowest_jump2;
+            lowest_jump2.magnitude_squared = INFINITY;
+            lowest_jump2.duration = -1.0f;
             for (uint32_t i = 1; i < surf1.size(); i++)
             {
                 Vector2 surf1_pt1 = surf1[i-1];
@@ -427,24 +520,51 @@ void godot::Pathfinder::generate_graph()
                         float jump_duration = try_find_unobstructed_jump(out_velocity, jump_from, jump_to, 5);
                         if (jump_duration > 0.0f)
                         {
-                            if (out_velocity.length_squared() < lowest_jump_magnitude_squared)
+                            if (out_velocity.length_squared() < lowest_jump1.magnitude_squared)
                             {
-                                lowest_jump_magnitude_squared = out_velocity.length_squared();
-                                lowest_jump_duration = jump_duration;
-                                lowest_jump_from = jump_from;
-                                lowest_jump_to = jump_to;
-                                surf1_edge_idx = i;
-                                surf2_edge_idx = j;
+                                lowest_jump1.magnitude_squared = out_velocity.length_squared();
+                                lowest_jump1.duration = jump_duration;
+                                lowest_jump1.from = jump_from;
+                                lowest_jump1.to = jump_to;
+                                lowest_jump1.surf1_edge_idx = i;
+                                lowest_jump1.surf2_edge_idx = j;
+                            }
+                        }
+                    }
+
+                    // DIRECTION 2 (surf2 -> surf1)
+                
+                    // add points along the edge to where they are surface_subdivision_distance apart
+                    subdivisions = ceilf((real_t)surf2_edge.length() / (real_t)max_surface_subdivision_distance);
+                    for (uint32_t subd = 0; subd < subdivisions; subd++)
+                    {
+                        // TODO start subdivision search from the middle of the edge
+                        // print_line("subd: " + String::num(subd) + " of " + String::num(subdivisions));
+                        Vector2 jump_from = surf2_pt1 + surf2_edge * ((real_t)subd / (real_t)subdivisions);
+                        Vector2 jump_to = Geometry2D::get_singleton()->get_closest_point_to_segment(jump_from, surf1_pt1, surf1_pt2);
+                        
+                        Vector2 out_velocity;
+                        float jump_duration = try_find_unobstructed_jump(out_velocity, jump_from, jump_to, 5);
+                        if (jump_duration > 0.0f)
+                        {
+                            if (out_velocity.length_squared() < lowest_jump2.magnitude_squared)
+                            {
+                                lowest_jump2.magnitude_squared = out_velocity.length_squared();
+                                lowest_jump2.duration = jump_duration;
+                                lowest_jump2.from = jump_from;
+                                lowest_jump2.to = jump_to;
+                                lowest_jump2.surf1_edge_idx = i;
+                                lowest_jump2.surf2_edge_idx = j;
                             }
                         }
                     }
                 }
             }
 
-            if (lowest_jump_duration > 0.0f)
+            if (lowest_jump1.duration > 0.0f)
             {
-                print_line("Jump from: " + String::num(lowest_jump_from.x) + ", " + String::num(lowest_jump_from.y) + " to: " + String::num(lowest_jump_to.x) + ", " + String::num(lowest_jump_to.y));
-                print_line("jump duration: " + String::num(lowest_jump_duration));
+                // print_line("Jump from: " + String::num(lowest_jump1.from.x) + ", " + String::num(lowest_jump1.from.y) + " to: " + String::num(lowest_jump1.to.x) + ", " + String::num(lowest_jump1.to.y));
+                // print_line("jump duration: " + String::num(lowest_jump1.duration));
                 // print_line("with jump velocity: " + String::num(lowest_jump_velocity.x) + ", " + String::num(lowest_jump_velocity.y));
                 // print_line("edge1: " + String::num(surf1_edge_idx));
                 // print_line("edge2: " + String::num(surf2_edge_idx));
@@ -452,34 +572,34 @@ void godot::Pathfinder::generate_graph()
                 // print_line("surf2: " + String::num(surf2_idx) + " of " + String::num(island_surface_node_ids.size()));
                 // print_line("surfaces: " + String::num_int64(island_surface_pts.size()) + "\n");
 
-                int64_t edge1_node1 = island_surface_node_ids[surf1_idx][surf1_edge_idx];
-                int64_t edge1_node2 = island_surface_node_ids[surf1_idx][surf1_edge_idx - 1];
+                int64_t edge1_node1 = island_surface_node_ids[surf1_idx][lowest_jump1.surf1_edge_idx];
+                int64_t edge1_node2 = island_surface_node_ids[surf1_idx][lowest_jump1.surf1_edge_idx - 1];
    
-                int64_t edge2_node1 = island_surface_node_ids[surf2_idx][surf2_edge_idx];
-                int64_t edge2_node2 = island_surface_node_ids[surf2_idx][surf2_edge_idx - 1];
+                int64_t edge2_node1 = island_surface_node_ids[surf2_idx][lowest_jump1.surf2_edge_idx];
+                int64_t edge2_node2 = island_surface_node_ids[surf2_idx][lowest_jump1.surf2_edge_idx - 1];
 
 
-                int64_t jump_from_node = node_id; 
-                graph->add_point(node_id++, lowest_jump_from);
+                int64_t jump_from_node = graph->get_point_count(); 
+                graph->add_point(jump_from_node, lowest_jump1.from);
                 graph->connect_points(jump_from_node, edge1_node1);
                 graph->connect_points(jump_from_node, edge1_node2);
                 // TODO is disconnecting necessary?
                 graph->disconnect_points(edge1_node1, edge1_node2);
                 
-                int64_t jump_to_node = node_id; 
-                graph->add_point(node_id++, lowest_jump_to);
+                int64_t jump_to_node = graph->get_point_count(); 
+                graph->add_point(jump_to_node, lowest_jump1.to);
                 graph->connect_points(jump_to_node, edge2_node1);
                 graph->connect_points(jump_to_node, edge2_node2);
                 // TODO is disconnecting necessary?
                 graph->disconnect_points(edge2_node1, edge2_node2);
                 
-                graph->add_jump_node(jump_from_node, jump_to_node, lowest_jump_duration);
+                graph->add_jump_node(jump_from_node, jump_to_node, lowest_jump1.duration);
 
                 // debug draw jump
-                Vector2 delta_pos = lowest_jump_to - lowest_jump_from;
-                Vector2 start_pos(lowest_jump_from.x, lowest_jump_from.y - agent_size.height / 2.0f);
+                Vector2 delta_pos = lowest_jump1.to - lowest_jump1.from;
+                Vector2 start_pos(lowest_jump1.from.x, lowest_jump1.from.y - agent_size.height / 2.0f);
                 Vector2 end_pos = start_pos + delta_pos;
-                Vector2 jump_velocity = delta_pos/lowest_jump_duration - acceleration * lowest_jump_duration * 0.5f;
+                Vector2 jump_velocity = delta_pos/lowest_jump1.duration - acceleration * lowest_jump1.duration * 0.5f;
                 print_line("Jump velocity: " + String::num(jump_velocity.x) + ", " + String::num(jump_velocity.y));
 
                 mesh->surface_set_color(Color(0, 1, 0));
@@ -487,7 +607,61 @@ void godot::Pathfinder::generate_graph()
                 mesh->surface_add_vertex_2d(start_pos + Vector2(0, -1.0));
                 mesh->surface_set_color(Color(0, 0, 1));
                 mesh->surface_add_vertex_2d(start_pos);
-                for (real_t t = 0.0f; t < lowest_jump_duration; t += 1.0/(real_t)5.0)
+                for (real_t t = 0.0f; t < lowest_jump1.duration; t += 1.0/(real_t)5.0)
+                {
+                    Vector2 pos = start_pos + jump_velocity * t + 0.5f * acceleration * t * t;
+                    mesh->surface_add_vertex_2d(pos);
+                    mesh->surface_add_vertex_2d(pos);
+                }
+                mesh->surface_add_vertex_2d(end_pos);
+                
+                mesh->surface_set_color(Color(0, 1, 1));
+                mesh->surface_add_vertex_2d(start_pos);
+                mesh->surface_set_color(Color(1, 1, 0));
+                mesh->surface_add_vertex_2d(end_pos);
+            }
+
+
+            if (lowest_jump2.duration > 0.0f)
+            {
+                print_line("Jump from: " + String::num(lowest_jump2.from.x) + ", " + String::num(lowest_jump2.from.y) + " to: " + String::num(lowest_jump2.to.x) + ", " + String::num(lowest_jump2.to.y));
+                print_line("jump duration: " + String::num(lowest_jump2.duration));
+
+                int64_t edge1_node1 = island_surface_node_ids[surf1_idx][lowest_jump2.surf1_edge_idx];
+                int64_t edge1_node2 = island_surface_node_ids[surf1_idx][lowest_jump2.surf1_edge_idx - 1];
+   
+                int64_t edge2_node1 = island_surface_node_ids[surf2_idx][lowest_jump2.surf2_edge_idx];
+                int64_t edge2_node2 = island_surface_node_ids[surf2_idx][lowest_jump2.surf2_edge_idx - 1];
+
+                int64_t jump_from_node = graph->get_point_count(); 
+                graph->add_point(jump_from_node, lowest_jump2.from);
+                graph->connect_points(jump_from_node, edge2_node1);
+                graph->connect_points(jump_from_node, edge2_node2);
+                // TODO is disconnecting necessary?
+                graph->disconnect_points(edge2_node1, edge2_node2);
+                
+                int64_t jump_to_node = graph->get_point_count(); 
+                graph->add_point(jump_to_node, lowest_jump2.to);
+                graph->connect_points(jump_to_node, edge1_node1);
+                graph->connect_points(jump_to_node, edge1_node2);
+                // TODO is disconnecting necessary?
+                graph->disconnect_points(edge1_node1, edge1_node2);
+                
+                graph->add_jump_node(jump_from_node, jump_to_node, lowest_jump2.duration);
+
+                // debug draw jump
+                Vector2 delta_pos = lowest_jump2.to - lowest_jump2.from;
+                Vector2 start_pos(lowest_jump2.from.x, lowest_jump2.from.y - agent_size.height / 2.0f);
+                Vector2 end_pos = start_pos + delta_pos;
+                Vector2 jump_velocity = delta_pos/lowest_jump2.duration - acceleration * lowest_jump2.duration * 0.5f;
+                print_line("Jump velocity: " + String::num(jump_velocity.x) + ", " + String::num(jump_velocity.y));
+
+                mesh->surface_set_color(Color(0, 1, 0));
+                mesh->surface_add_vertex_2d(start_pos);
+                mesh->surface_add_vertex_2d(start_pos + Vector2(0, -1.0));
+                mesh->surface_set_color(Color(0, 0, 1));
+                mesh->surface_add_vertex_2d(start_pos);
+                for (real_t t = 0.0f; t < lowest_jump2.duration; t += 1.0/(real_t)5.0)
                 {
                     Vector2 pos = start_pos + jump_velocity * t + 0.5f * acceleration * t * t;
                     mesh->surface_add_vertex_2d(pos);
@@ -542,7 +716,7 @@ float godot::Pathfinder::try_find_unobstructed_jump(Vector2& out_velocity, Vecto
         params->set_transform(Transform2D(0.0f, pos));
         if (space_state->collide_shape(params, 1).size() > 0)
         {
-            print_line("Jump blocked at time " + String::num(t) + " out of " + String::num(jump_duration));
+            // print_line("Jump blocked at time " + String::num(t) + " out of " + String::num(jump_duration));
             return -1.0f;
         }   
     }
