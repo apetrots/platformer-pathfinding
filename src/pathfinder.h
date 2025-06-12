@@ -16,6 +16,40 @@
 
 namespace godot {
 
+class PathAction : public godot::RefCounted{
+    GDCLASS(PathAction, godot::RefCounted)
+
+protected:
+    static void _bind_methods() {
+        ClassDB::bind_method(D_METHOD("get_from"), &PathAction::get_from);
+        ClassDB::bind_method(D_METHOD("set_from", "from"), &PathAction::set_from); 
+        ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "from"), "set_from", "get_from");
+        ClassDB::bind_method(D_METHOD("get_is_jump"), &PathAction::get_is_jump);
+        ClassDB::bind_method(D_METHOD("set_is_jump", "is_jump"), &PathAction::set_is_jump);
+        ADD_PROPERTY(PropertyInfo(Variant::BOOL, "is_jump"), "set_is_jump", "get_is_jump");
+        ClassDB::bind_method(D_METHOD("get_jump_velocity"), &PathAction::get_jump_velocity);
+        ClassDB::bind_method(D_METHOD("set_jump_velocity", "jump_velocity"), &PathAction::set_jump_velocity);
+        ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "jump_velocity"), "set_jump_velocity", "get_jump_velocity");
+        ClassDB::bind_method(D_METHOD("get_to"), &PathAction::get_to);
+        ClassDB::bind_method(D_METHOD("set_to", "to"), &PathAction::set_to);
+        ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "to"), "set_to", "get_to");
+    }
+public:
+    Vector2 from;
+    bool is_jump = false;
+    Vector2 jump_velocity;
+    Vector2 to;
+    
+    Vector2 get_from() const { return from; }
+    void set_from(const Vector2 &p_from) { from = p_from; }
+    bool get_is_jump() const { return is_jump; }
+    void set_is_jump(bool p_is_jump) { is_jump = p_is_jump; }
+    Vector2 get_jump_velocity() const { return jump_velocity; }
+    void set_jump_velocity(const Vector2 &p_jump_velocity) { jump_velocity = p_jump_velocity; }
+    Vector2 get_to() const { return to; }
+    void set_to(const Vector2 &p_to) { to = p_to; }
+};
+
 class Pathfinder : public godot::Node {
 	GDCLASS(Pathfinder, godot::Node)
 
@@ -58,11 +92,12 @@ public:
 
 	void _process(double delta) override;
 
-    void find_path(Vector2 from, Vector2 to);
+    godot::TypedArray<PathAction> find_path(Vector2 from, Vector2 to);
     void generate_graph();
 
     float try_find_unobstructed_jump(Vector2& out_velocity, Vector2 from, Vector2 to, int test_intervals);
 };
+
 
 }
 

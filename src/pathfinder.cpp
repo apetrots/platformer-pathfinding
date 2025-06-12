@@ -68,12 +68,12 @@ void godot::Pathfinder::_process(double delta)
     }
 }
 
-void godot::Pathfinder::find_path(Vector2 from, Vector2 to)
+godot::TypedArray<PathAction> godot::Pathfinder::find_path(Vector2 from, Vector2 to)
 {
     if (graph.is_null())
     {
         print_line("Graph is null!");
-        return;
+        return {};
     }
 
     int64_t from_id = graph->get_closest_point(from);
@@ -82,32 +82,36 @@ void godot::Pathfinder::find_path(Vector2 from, Vector2 to)
     if (from_id == -1 || to_id == -1)
     {
         print_line("Invalid point!");
-        return;
+        return {};
     }
 
     PackedInt64Array path_ids = graph->get_id_path(from_id, to_id);
 
     if (path_ids.size() == 0)
     {
-        return;
+        return {};
     }
 
     MeshInstance2D *debug_draw_node = Object::cast_to<MeshInstance2D>(get_node_or_null(debug_draw));
-    ERR_FAIL_NULL_MSG(debug_draw_node, "MeshInstance2D is invalid: '" + debug_draw + "'");
+    // ERR_FAIL_NULL_MSG(debug_draw_node, "MeshInstance2D is invalid: '" + debug_draw + "'");
 
     Ref<ImmediateMesh> mesh = debug_draw_node->get_mesh();
     mesh->clear_surfaces();
     mesh->surface_begin(Mesh::PRIMITIVE_LINE_STRIP);
 
+    TypedArray<PathAction> path_actions;
+
     Vector2 start_pt = graph->get_point_position(path_ids[0]);
     mesh->surface_add_vertex_2d(start_pt);
 
+    Vector2 last_pt = from;
     for (int64_t node_id : path_ids)
     {
         Vector2 pt = graph->get_point_position(node_id);
         auto scale = graph->get_point_weight_scale(node_id);
-        print_line("Node: " + String::num(node_id) + ", " + String::num(scale));
-        print_line("Node pos: " + String::num(pt.x) + ", " + String::num(pt.y));
+
+        Ref<PathAction> action = {};
+        action.instantiate();
 
         auto jump_info = graph->get_jump_info(node_id);
         if (jump_info != NULL)
@@ -116,7 +120,12 @@ void godot::Pathfinder::find_path(Vector2 from, Vector2 to)
             Vector2 start_pos(jump_info->from.x, jump_info->from.y - agent_size.height / 2.0f);
             Vector2 end_pos = start_pos + delta_pos;
             Vector2 jump_velocity = delta_pos/jump_info->duration - acceleration * jump_info->duration * 0.5f;
-            print_line("Jumpin on the path! " + String::num(jump_velocity.x) + ", " + String::num(jump_velocity.y));
+
+            action->is_jump = true;
+            action->from = start_pos;
+            action->jump_velocity = jump_velocity;
+            action->to = end_pos;
+            last_pt = end_pos;
 
             mesh->surface_set_color(Color(0, 1, 0));
             mesh->surface_add_vertex_2d(jump_info->from);
@@ -136,11 +145,19 @@ void godot::Pathfinder::find_path(Vector2 from, Vector2 to)
             Vector2 pt = graph->get_point_position(node_id);
             mesh->surface_set_color(Color(0, 1, 0));
             mesh->surface_add_vertex_2d(pt);
+            
+            action->is_jump = false;
+            action->from = last_pt;
+            action->to = pt;
+            last_pt = pt;
         }
 
+        path_actions.push_back(action);
     }
 
     mesh->surface_end();
+
+    return path_actions;
 }
 
 struct Edge

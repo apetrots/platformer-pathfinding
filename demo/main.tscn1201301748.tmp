@@ -29,10 +29,7 @@ func _input(event: InputEvent) -> void:
 		var path = pathfinder.find_path(from, to)
 		
 		for action in path:
-			print(action.from);
-			print(action.to);
-			print(action.jump_velocity);
-			
+			print(action);
 "
 
 [node name="Main" type="Node2D"]

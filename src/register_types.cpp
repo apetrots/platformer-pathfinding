@@ -2,6 +2,7 @@
 
 #include "gdexample.h"
 #include "pathfinder.h"
+#include "platformer_astar2d.h"
 
 #include <gdextension_interface.h>
 #include <godot_cpp/core/defs.hpp>
@@ -17,7 +18,9 @@ void initialize_example_module(ModuleInitializationLevel p_level)
     }
 
     GDREGISTER_CLASS(GDExample);
+    GDREGISTER_CLASS(PathAction);
     GDREGISTER_CLASS(Pathfinder);
+    GDREGISTER_VIRTUAL_CLASS(PlatformerAStar2D);
 }
 
 void uninitialize_example_module(ModuleInitializationLevel p_level)

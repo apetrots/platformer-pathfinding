@@ -7,6 +7,8 @@ void PlatformerAStar2D::_bind_methods()
     ClassDB::bind_method(D_METHOD("add_jump_node", "from", "to", "jump_duration"), &PlatformerAStar2D::add_jump_node);
     ClassDB::bind_method(D_METHOD("is_jump_node", "node"), &PlatformerAStar2D::is_jump_node);
     // ClassDB::bind_method(D_METHOD("get_jump_duration", "jump_node_id"), &PlatformerAStar2D::get_jump_info);
+
+
 }
 
 // Override the _compute_cost function
@@ -15,18 +17,24 @@ float PlatformerAStar2D::_compute_cost(int64_t from_id, int64_t to_id) const
     // if going from a jump node to a normal node, add to cost.
     if (is_jump_node(from_id))
     {
-        // return 1.0f/jump_node_weight_scale;
+        return 100.0f;
         // return 0.0f;
     }
 
-    return 1.0f;
+    return 0.0f;
 }
 
 
 float PlatformerAStar2D::_estimate_cost(int64_t from_id, int64_t end_id) const
 {
-    // Custom cost computation logic for platformer
-    return 0.0f; // Example: constant cost for all edges
+    // if going from a jump node to a normal node, add to cost.
+    if (is_jump_node(from_id))
+    {
+        return 100.0f;
+        // return 0.0f;
+    }
+
+    return 0.0f;
 }
 
 
@@ -51,7 +59,7 @@ int64_t PlatformerAStar2D::add_jump_node(int64_t from, int64_t to, real_t durati
 // Check if a node is a jump node
 bool PlatformerAStar2D::is_jump_node(int64_t node) const {
     // Do performant, quick check first before making sure...
-    if (this->get_point_weight_scale(node) != jump_node_weight_scale)
+    if (abs(this->get_point_weight_scale(node) - jump_node_weight_scale) > 0.01f)
         return false;
 
     return jumps.find(node) != jumps.end();
