@@ -155,6 +155,10 @@ godot::TypedArray<PathAction> godot::Pathfinder::find_path(Vector2 from, Vector2
         path_actions.push_back(action);
     }
 
+    Ref<PathAction> last = path_actions[path_actions.size() - 1];
+    if (!last->is_jump)
+        last->to = to;
+
     mesh->surface_end();
 
     return path_actions;
@@ -730,6 +734,9 @@ float godot::Pathfinder::try_find_unobstructed_jump(Vector2& out_velocity, Vecto
     {
         Vector2 pos = start_pos + jump_velocity * t + 0.5f * acceleration * t * t;
         
+        // TODO: variable collision mask
+        params->set_collision_mask(1);
+
         params->set_transform(Transform2D(0.0f, pos));
         if (space_state->collide_shape(params, 1).size() > 0)
         {
